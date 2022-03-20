@@ -1,3 +1,4 @@
+from ipaddress import ip_address
 import socket
 import os
 import time
@@ -65,22 +66,33 @@ class ClientInstance:
             return True
         return False
 
+# Shared Comms Section
+class Comms:
 
-# Server Section
-class Server:
-    def __init__(self, port, logger):
-        # self.ip = socket.gethostbyname(socket.gethostname())
-        self.ip = "127.0.0.1"
+    def __init__(self, ip, port, nickname, logger) -> None:
+        self.ip = ip
         self.port = port
-        self.nickname = "SERVER"
-        self.server_persona = ClientInstance(
-            nickname=self.nickname, ip=self.ip, port=self.port, online=True
-        )
-        self.clients = [self.server_persona]
-        self.inputBuffer = Queue()
+        self.comm = None
+        self.nickname = nickname
+        self.update_needed = False
         self.ack_checker = {}
+        self.input_queue = Queue()
+        self.clients = [ClientInstance(
+            nickname=self.nickname, ip=self.ip, port=self.port, online=True
+        )]
         self.logger = logger
-        self.server_thread()
+
+    def start(self):
+        self.comm = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.comm.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.comm.bind((self.ip, self.port))
+        self.logger.info(f"SERVER: {self.ip}:{self.port}")
+
+        Thread(target=self.receiver_thread).start()
+
+
+    def stop(self):
+        self.comm.close()
 
     def is_client(self, nickname):
         for client in self.clients:
@@ -102,63 +114,35 @@ class Server:
     def disable_client(self, client):
         client.online = False
         self.logger.debug(f"DISABLED: {client}")
-        self.update_clients()
 
     def enable_client(self, client):
         client.online = True
         self.logger.debug(f"ENABLED: {client}")
-        self.update_clients()
 
-    def register_client(self, addr, msg):
-        self.logger.debug(f"REGISTER REQUEST: {addr}->{msg.nickname}")
-        if self.is_client(msg.nickname):
-            client = self.get_client(msg.nickname)
-            client.ip = addr[0]
-            client.port = int(addr[1])
-            client.online = True
-            self.logger.info(
-                f"CLIENT UPDATED: {msg.nickname} to {addr[0]}:{addr[1]}")
-        else:
-            self.logger.info(
-                f"CLIENT REGISTERED: {msg.nickname} at {addr[0]}:{addr[1]}"
-            )
-            client = ClientInstance(
-                ip=addr[0],
-                port=int(addr[1]),
-                nickname=msg.nickname,
-                online=True,
-            )
-            self.clients.append(client)
-            self.logger.info(
-                f"CLIENT REGISTERED: {msg.nickname} to {addr[0]}:{addr[1]}"
-            )
-        self.send_ack(msg)
-        self.direct_message(
-            Message(
-                event_id=Events.REGISTER_CONFIRM,
-                nickname=self.nickname,
-                recipient=client.nickname,
-                data="[[ Welcome, you are registered. ]]",
-            )
-        )
-        self.update_clients()
-        self.send_offline(client)
+    def send(
+            self,
+            msg,
+            peer,
+            ack=False,
+            verify=False,
+            timeout=TIMEOUT_MESSAGE,
+            retries=0,
+        ):
+        msg.msg_hash = hash(msg)
+        if ack:
+            self.track_ack(msg)
+        self.client.sendto(msg.to_json().encode(), (peer.ip, peer.port))
+        if ack and verify:
+            return self.check_ack_timeout(msg, timeout, retries)
+        if verify and not ack:
+            self.logger.debug(f"IGNORE:  Verify w/o Track for {msg}")
+        return True
 
-    def deregister_client(self, msg):
-        client = self.get_client(msg.nickname)
-        self.logger.info(f"DISABLE REQUEST: {client.nickname}")
-        self.send_ack(msg)
-        self.disable_client(client)
-        self.update_clients()
-
-    def update_clients(self):
-        msg = Message(
-            event_id=Events.CLIENT_UPDATE,
-            nickname=self.nickname,
-            data=json.dumps([client.to_json() for client in self.clients]),
-        )
-        self.broadcast(msg, self.server_persona)
-        self.logger.debug("SERVER: UPDATE CLIENTS")
+    def receiver_thread(self):
+        self.logger.info(f"RECEIVER_THREAD: {self.ip}:{self.port}")
+        while True:
+            data, addr = self.comm.recvfrom(MSG_SIZE)
+            self.input_queue.put((data, addr))
 
     def check_ack(self, msg):
         if msg.data in self.ack_checker:
@@ -214,9 +198,9 @@ class Server:
         self.direct_message(ping)
         if not self.check_ack_timeout(ping, TIMEOUT_MESSAGE, 5):
             target.online = False
-            self.update_clients()
-            self.logger.debug(
-                f"SERVER: Failed Health Check: {target.nickname}")
+            self.update_needed = True
+        self.logger.debug(
+            f"SERVER: Failed Health Check: {target.nickname}")
 
     def store_offline(self, msg):
         self.send_ack(msg)
@@ -234,7 +218,7 @@ class Server:
                         data=f"ERROR: {msg.recipient} IS online!",
                     )
                 )
-                self.update_clients()
+                self.update_needed = True
             else:
                 target.offline_messages.append(msg)
                 self.direct_message(
@@ -254,7 +238,7 @@ class Server:
                     data=f"ERROR: {msg.recipient} does not exist!",
                 )
             )
-            self.update_clients()
+            self.update_needed = True
 
     def send_offline(self, client):
         if len(client.offline_messages) > 0:
@@ -277,38 +261,58 @@ class Server:
                 )
             client.offline_messages = []
 
-    def direct_message(self, message):
-        if self.is_client(message.recipient):
-            message.msg_hash = hash(message)
-            target_client = self.get_client(message.recipient)
-            self.logger.debug(f"SERVER SEND: {message} to {target_client}")
-            try:
-                self.server.sendto(
-                    message.to_json().encode(),
-                    (target_client.ip, target_client.port),
-                )
-                self.track_ack(message)
-            except Exception as e:
-                self.logger.debug(
-                    f"FAILED: send to: {target_client} -> {e} -- DISABLING {target_client}"
-                )
-                self.disable_client(target_client)
-        else:
-            self.logger.debug(f"UNKNOWN: {message.recipient}")
+    def send(
+            self,
+            msg,
+            peer,
+            ack=False,
+            verify=False,
+            timeout=TIMEOUT_MESSAGE,
+            retries=0,
+        ):
+        msg.msg_hash = hash(msg)
+        if ack:
+            self.track_ack(msg)
+        self.comm.sendto(msg.to_json().encode(), (peer.ip, peer.port))
+        if ack and verify:
+            return self.check_ack_timeout(msg, timeout, retries)
+        if verify and not ack:
+            self.logger.debug(f"IGNORE:  Verify w/o Track for {msg}")
+        return True
 
-    def broadcast(self, message, sending_client):
-        self.logger.debug(f"BROADCAST: {message} from {sending_client}")
+
+    # def direct_message(self, message):
+    #     if self.is_client(message.recipient):
+    #         message.msg_hash = hash(message)
+    #         target_client = self.get_client(message.recipient)
+    #         self.logger.debug(f"SERVER SEND: {message} to {target_client}")
+    #         try:
+    #             self.comm.sendto(
+    #                 message.to_json().encode(),
+    #                 (target_client.ip, target_client.port),
+    #             )
+    #             self.track_ack(message)
+    #         except Exception as e:
+    #             self.logger.debug(
+    #                 f"FAILED: send to: {target_client} -> {e} -- DISABLING {target_client}"
+    #             )
+    #             self.disable_client(target_client)
+    #     else:
+    #         self.logger.debug(f"UNKNOWN: {message.recipient}")
+
+    def broadcast(self, message):
+        self.logger.debug(f"BROADCAST: {message} from {message.nickname}")
         message.msg_hash = hash(message)
         for client in self.clients:
             if (
-                client != sending_client
+                client.nickname != message.nickname
                 and client.online
                 and client.nickname != "SERVER"
             ):
                 try:
                     message.recipient = client.nickname
                     self.logger.debug(f"SENDING: BROADCAST to {client}")
-                    self.server.sendto(
+                    self.comm.sendto(
                         message.to_json().encode(), (client.ip, client.port)
                     )
 
@@ -318,25 +322,91 @@ class Server:
                     )
                     self.disable_client(client)
 
-    def server_thread(self):
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind((self.ip, self.port))
-        self.logger.info(f"SERVER: {self.ip}:{self.port}")
 
-        Thread(target=self.receiver_thread, args=()).start()
+
+
+
+
+
+
+# Server Section
+class Server:
+    def __init__(self, port, logger):
+        # self.ip = socket.gethostbyname(socket.gethostname())
+        self.ip = "127.0.0.1"
+        self.port = port
+        self.nickname = "SERVER"
+        self.clients = []
+        self.logger = logger
+        self.comms = None
+        self.update_needed = False
+        self.server_thread()
+
+    def register_client(self, addr, msg):
+        self.logger.debug(f"REGISTER REQUEST: {addr}->{msg.nickname}")
+        if self.comms.is_client(msg.nickname):
+            client = self.comms.get_client(msg.nickname)
+            client.ip = addr[0]
+            client.port = int(addr[1])
+            client.online = True
+            self.logger.info(
+                f"CLIENT UPDATED: {msg.nickname} to {addr[0]}:{addr[1]}")
+        else:
+            self.logger.info(
+                f"CLIENT REGISTERED: {msg.nickname} at {addr[0]}:{addr[1]}"
+            )
+            client = ClientInstance(
+                ip=addr[0],
+                port=int(addr[1]),
+                nickname=msg.nickname,
+                online=True,
+            )
+            self.comms.clients.append(client)
+            self.logger.info(
+                f"CLIENT REGISTERED: {msg.nickname} to {addr[0]}:{addr[1]}"
+            )
+        self.comms.send_ack(msg)
+        self.comms.direct_message(
+            Message(
+                event_id=Events.REGISTER_CONFIRM,
+                nickname=self.nickname,
+                recipient=client.nickname,
+                data="[[ Welcome, you are registered. ]]",
+            )
+        )
+        self.update_needed = True
+        self.comms.send_offline(client)
+
+    def deregister_client(self, msg):
+        client = self.comms.get_client(msg.nickname)
+        self.logger.info(f"DISABLE REQUEST: {client.nickname}")
+        self.comms.send_ack(msg)
+        self.comms.disable_client(client)
+        self.update_clients()
+
+    def update_clients(self):
+        msg = Message(
+            event_id=Events.CLIENT_UPDATE,
+            nickname=self.nickname,
+            data=json.dumps([client.to_json()
+                            for client in self.comms.clients]),
+        )
+        self.update_needed = False
+        self.comms.update_needed = False
+        self.comms.broadcast(msg)
+        self.logger.debug("SERVER: UPDATE CLIENTS")
+
+    def server_thread(self):
+        self.comms = Comms(ip=self.ip, port=self.port, nickname=self.nickname, logger=self.logger)
+        self.comms.start()
 
         while True:
-            while not self.inputBuffer.empty():
-                data, addr = self.inputBuffer.get()
+            if self.update_needed or self.comms.update_needed:
+                self.update_clients()
+            while not self.comms.input_queue.empty():
+                data, addr = self.comms.input_queue.get()
                 self.logger.debug(f"RECEIVED: {addr}: {data.decode()}")
                 self.handle_message(data, addr)
-
-    def receiver_thread(self):
-        self.logger.info(f"RECEIVER_THREAD: {self.ip}:{self.port}")
-        while True:
-            data, addr = self.server.recvfrom(MSG_SIZE)
-            self.inputBuffer.put((data, addr))
 
     def handle_message(self, data, addr):
         msg = Message.from_json(data)
@@ -349,7 +419,7 @@ class Server:
             self.deregister_client(msg)
 
         if msg.event_id == Events.ACK:
-            self.receive_ack(msg)
+            self.comms.receive_ack(msg)
 
         if msg.event_id == Events.BROADCAST:
             client = self.get_client(msg.nickname)
@@ -357,13 +427,13 @@ class Server:
                 self.logger.info(
                     "SERVER ERROR: unknown sender - dropping message!")
             else:
-                self.broadcast(msg, client)
+                self.comms.broadcast(msg, client)
 
         if msg.event_id == Events.OFFLINE_MESSAGE:
             self.logger.debug(
                 f"SERVER OFFLINE MESSAGE: {msg.nickname} -> {msg.recipient}: {msg.data}"
             )
-            self.store_offline(msg)
+            self.comms.store_offline(msg)
 
 
 # Client Section
@@ -468,7 +538,7 @@ class Client:
 
     def deregister(self, nickname):
         reg_msg = Message(
-            event_id=Events.DEREGISTER, nickname=nickname, recipient="SERVER"
+            event_id=Events.DEREGISTER, nickname=nickname, data='', recipient="SERVER"
         )
         reg_msg.msg_hash = hash(reg_msg)
         self.logger.debug(
