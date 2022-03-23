@@ -70,8 +70,9 @@ class Message:
     retries: int = None
 
     def __post_init__(self):
-        self.hash = hash(
-            (self.event_id, self.sender, self.data, self.recipient))
+        if self.hash == None:
+            self.hash = hash(
+                (self.event_id, self.sender, self.data, self.recipient))
 
     def __str__(self):
         return f"{self.event_id}|{self.sender}|{self.recipient}|{self.data}|{self.hash}"
@@ -105,17 +106,8 @@ class Comms:
         while True:
             data, addr = self.comm.recvfrom(MSG_SIZE)
             self.input_queue.put((data, addr))
-            print(data,addr)
-            msg = Message.from_json(data.decode('utf-8'))
-            print(msg)
 
-    def send(self, 
-            msg,
-            ack=False,
-            verify=False,
-            timeout=TIMEOUT_MESSAGE,
-            retries=0,
-        ):
+    def send(self, msg):
         # if ack:
         #     self.track_ack(msg)
         print(msg)
