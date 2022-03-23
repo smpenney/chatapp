@@ -145,11 +145,13 @@ class Comms:
             self.input_queue.put((data, addr))
 
     def check_ack(self, msg):
-        # if msg.data in self.ack_checker:
-        #     return True
-        # return False
-        if msg.msg_hash in self.ack_checker:
-            return self.ack_checker[msg.msg_hash]
+        if msg.data in self.ack_checker:
+            return True
+        return False
+
+    def get_ack_status(self, msg):
+        if msg.data in self.ack_checker:
+            return self.ack_checker[msg.data]
         return False
 
     def track_ack(self, msg):
@@ -161,7 +163,7 @@ class Comms:
         sleep_time = timeout / intervals
         for _ in range(retries + 1):
             for _ in range(intervals):
-                if self.check_ack(msg):
+                if self.get_ack_status(msg):
                     return True
                 time.sleep(sleep_time / 1000)
         return False
@@ -504,7 +506,7 @@ class Client:
             )
         ]
         self.logger = logger
-        self.ack_checker = {}
+        self.ack_checkerFOOBAR = {}
         self.client_thread()
 
     def show_peers(self):
@@ -781,6 +783,7 @@ class Client:
 
         if msg.event_id == Events.REGISTER_CONFIRM:
             print(f"<<{msg.nickname}>> {msg.data}")
+            self.send_ack(msg)
             self.online = True
 
         if msg.event_id == Events.BROADCAST:

@@ -5,7 +5,26 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Client1",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "client",
+                "-p",
+                "9999",
+                "-i",
+                "127.0.0.1",
+                "-c",
+                "3001",
+                "-n",
+                "Client1"
+            ]
+        },
+        {
+            "name": "SERVER",
             "type": "python",
             "request": "launch",
             "program": "${file}",
