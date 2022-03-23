@@ -60,22 +60,18 @@ class Peer:
 @dataclass_json
 @dataclass
 class Message:
-    event_id: [Events]
-    sender: InitVar[Peer]
-    recipient: InitVar[Peer] = None
-    data: InitVar[str] = None
+    event_id: Events
+    sender: Peer
+    recipient: Peer = None
+    data: str = None
     hash: int = None
     ack: bool = False
     timeout: int = None
     retries: int = None
 
-    def __post_init__(self, event_id, sender, recipient, data):
-        self.event_id = event_id
-        self.sender = sender
-        self.data = data
-        self.recipient = recipient
+    def __post_init__(self):
         self.hash = hash(
-            (event_id, sender, data, recipient))
+            (self.event_id, self.sender, self.data, self.recipient))
 
     def __str__(self):
         return f"{self.event_id}|{self.sender}|{self.recipient}|{self.data}|{self.hash}"
@@ -110,7 +106,7 @@ class Comms:
             data, addr = self.comm.recvfrom(MSG_SIZE)
             self.input_queue.put((data, addr))
             print(data,addr)
-            msg = json.loads(data).decode('utf-8')
+            msg = Message.from_json(data.decode('utf-8'))
             print(msg)
 
     def send(self, 
@@ -123,7 +119,7 @@ class Comms:
         # if ack:
         #     self.track_ack(msg)
         print(msg)
-        self.comm.sendto(json.dumps(msg).encode('utf-8'), (msg.recipient.ip, msg.recipient.port))
+        self.comm.sendto(msg.to_json().encode('utf-8'), (msg.recipient.ip, msg.recipient.port))
         # if ack and verify:
         #     return self.check_ack_timeout(msg, timeout, retries)
         # if verify and not ack:
