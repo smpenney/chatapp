@@ -21,6 +21,7 @@ RETRY_DEREG = 5
 TIMEOUT_MESSAGE = 500
 RETRY_MESSAGE = 2
 
+
 class Events(Enum):
     REGISTER = 1
     DEREGISTER = 2
@@ -35,6 +36,7 @@ class Events(Enum):
     PING = 97
     ERROR = 98
     ACK = 99
+
 
 @dataclass_json
 @dataclass
@@ -56,6 +58,7 @@ class Peer:
 
     def __hash__(self):
         return hash((self.name, self.ip, self.port))
+
 
 @dataclass_json
 @dataclass
@@ -85,7 +88,7 @@ class Comms:
         self.input_queue = Queue()
         self.me = me
         self.server = server
-        self.peers = [ me, server ]
+        self.peers = [me, server]
         self.logger = logger
 
         self.start()
@@ -102,7 +105,8 @@ class Comms:
         self.comm.close()
 
     def receiver_thread(self):
-        self.logger.info(f"RECEIVER_THREAD: {self.me.name} -> {self.me.ip}:{self.me.port}")
+        self.logger.info(
+            f"RECEIVER_THREAD: {self.me.name} -> {self.me.ip}:{self.me.port}")
         while True:
             data, addr = self.comm.recvfrom(MSG_SIZE)
             self.input_queue.put((data, addr))
@@ -111,34 +115,13 @@ class Comms:
         # if ack:
         #     self.track_ack(msg)
         print(msg)
-        self.comm.sendto(msg.to_json().encode('utf-8'), (msg.recipient.ip, msg.recipient.port))
+        self.comm.sendto(msg.to_json().encode('utf-8'),
+                         (msg.recipient.ip, msg.recipient.port))
         # if ack and verify:
         #     return self.check_ack_timeout(msg, timeout, retries)
         # if verify and not ack:
         #     self.logger.debug(f"IGNORE:  Verify w/o Track for {msg}")
         # return True
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def get_args():
@@ -201,7 +184,8 @@ def main():
             and args.client_port is not None
             and args.ip is not None
         ):
-            Client.Client(args.name, args.client_port, args.ip, args.port, logger)
+            Client.Client(args.name, args.client_port,
+                          args.ip, args.port, logger)
         else:
             print("-p/port, -i/ip, and -n/name are all required for client startup")
 

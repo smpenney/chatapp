@@ -2,6 +2,7 @@ import app
 from threading import Thread
 from queue import Queue
 
+
 class Server():
 
     def __init__(self, port, logger):
@@ -9,8 +10,9 @@ class Server():
         self.ip = "127.0.0.1"
         self.port = port
         self.logger = logger
-        
-        self.me = app.Peer(name='SERVER', ip=self.ip, port=self.port, online=True)
+
+        self.me = app.Peer(name='SERVER', ip=self.ip,
+                           port=self.port, online=True)
         self.peers = [self.me]
 
         self.input_queue = Queue()
@@ -33,3 +35,5 @@ class Server():
     def handle_message(self, msg):
         if msg.event_id == app.Events.BROADCAST:
             print(msg)
+            msg.recipient, msg.sender = msg.sender, msg.recipient
+            self.comms.send(msg)

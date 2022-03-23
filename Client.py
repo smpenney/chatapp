@@ -2,31 +2,42 @@ import app
 import socket
 from threading import Thread
 
+
 class Client():
 
     def __init__(self, name, client_port, server_ip, server_port, logger):
         self.ip = socket.gethostbyname(socket.gethostname())
         self.port = client_port
         self.logger = logger
-        
+
         self.me = app.Peer(
-                            name=name, 
-                            ip=self.ip,
-                            port=self.port, 
-                            online=False
-                            )
+            name=name,
+            ip=self.ip,
+            port=self.port,
+            online=False
+        )
         self.server = app.Peer(
-                                name='SERVER', 
-                                ip=server_ip, 
-                                port=server_port, 
-                                online=False
-                                )
-        self.peers = [self.me, self.server]
+            name='SERVER',
+            ip=server_ip,
+            port=server_port,
+            online=False
+        )
 
         self.comms = app.Comms(self.me, self.server, logger)
 
+        Thread(target=self.watch_queue).start()
         self.shell()
 
+    def watch_queue(self):
+        while True:
+            while not self.comms.input_queue.empty():
+                data, addr = self.comms.input_queue.get()
+                self.logger.debug(f"RECEIVED: {addr}: {data.decode()}")
+                msg = app.Message.from_json(data.decode('utf-8'))
+                self.handle_message(msg)
+
+    def handle_message(self, msg):
+        print(msg)
 
     def shell(self):
         while True:
