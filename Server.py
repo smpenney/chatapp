@@ -1,6 +1,6 @@
-import app
-from threading import Thread
-from queue import Queue
+import Comms
+from Global import *
+from Structs import Peer, Message, Events
 
 
 class Server():
@@ -11,13 +11,11 @@ class Server():
         self.port = port
         self.logger = logger
 
-        self.me = app.Peer(name='SERVER', ip=self.ip,
+        self.me = Peer(name='SERVER', ip=self.ip,
                            port=self.port, online=True)
         self.peers = [self.me]
 
-        self.input_queue = Queue()
-
-        self.comms = app.Comms(self.me, self.me, logger)
+        self.comms = Comms.Comms(self.me, self.me, logger)
         self.update_needed = False
 
         self.watch_queue()
@@ -29,11 +27,13 @@ class Server():
             while not self.comms.input_queue.empty():
                 data, addr = self.comms.input_queue.get()
                 self.logger.debug(f"RECEIVED: {addr}: {data.decode()}")
-                msg = app.Message.from_json(data.decode('utf-8'))
+                msg = Message.from_json(data.decode('utf-8'))
                 self.handle_message(msg)
 
     def handle_message(self, msg):
-        if msg.event_id == app.Events.BROADCAST:
-            print(msg)
-            msg.recipient, msg.sender = msg.sender, msg.recipient
-            self.comms.send(msg)
+        self.logger.debug(f'{self.me.name}: {msg}')
+        if msg.event_id in [Events.BROADCAST]:
+            self.comms.broadcast(msg)
+
+        if msg.event_id in [Events.DIRECT_MESSAGE]:
+            pass
