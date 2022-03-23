@@ -1,4 +1,4 @@
 #!/bin/bash
 
 . venv/bin/activate
-python3 ./app.py server -p 9999
+python3 ./chat.py server -p 9999

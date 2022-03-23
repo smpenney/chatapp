@@ -3,6 +3,7 @@ import socket
 from threading import Thread
 from Global import *
 from Structs import Peer, Message, Events
+import json
 
 
 class Client():
@@ -39,9 +40,46 @@ class Client():
                 msg = Message.from_json(data.decode('utf-8'))
                 self.handle_message(msg)
 
+    def register(self, name):
+        self.me.name = name
+        self.me.online = True
+        msg = Message(Events.REGISTER,
+                    sender=self.me,
+                    recipient=self.server,
+                    data = '',
+                    ack = True,
+                    timeout = TIMEOUT_DEREG,
+                    retries = 3
+                )
+        self.comms.send(msg)
+
+    def deregister(self, name):
+        self.me.online = False
+        msg = Message(Events.DEREGISTER,
+                    sender = self.me,
+                    recipient = self.server,
+                    data = '',
+                    ack = True,
+                    timeout = TIMEOUT_DEREG,
+                    retries = 3
+                )
+        self.comms.send(msg)
+
+    def update_clients(self, msg):
+        print("[[Client Table Updated]]")
+        self.comms.peers = []
+        for peer in json.loads(msg.data):
+            self.comms.peers.append(Peer.from_json(peer))
+        print(self.comms.peers)
+
     def handle_message(self, msg):
-        self.logger.debug(f'{self.me.name}: {msg}')
-        print(msg)
+        if msg.event_id in [Events.BROADCAST, Events.DIRECT_MESSAGE]:
+            self.logger.debug(f'{self.me.name}: {msg}')
+            print(msg)
+
+        if msg.event_id == Events.CLIENT_UPDATE:
+            self.update_clients(msg)
+
 
     def shell(self):
         while True:
@@ -82,23 +120,23 @@ class Client():
             elif data == "":
                 continue
 
-            # elif data == "peers":
-            #     self.show_peers()
-            #     continue
+            elif data == "peers":
+                self.comms.show_peers()
+                continue
 
-            # elif data.startswith("dereg"):
-            #     parts = data.split()
-            #     if len(parts) != 1:
-            #         self.deregister(parts[1])
-            #     else:
-            #         print("USAGE: dereg {nickname}")
+            elif data.startswith("dereg"):
+                parts = data.split()
+                if len(parts) != 1:
+                    self.deregister(parts[1])
+                else:
+                    print("USAGE: dereg {nickname}")
 
-            # elif data.startswith("reg"):
-            #     parts = data.split()
-            #     if len(parts) != 1:
-            #         self.register(parts[1])
-            #     else:
-            #         print("USAGE: reg {nickname}")
+            elif data.startswith("reg"):
+                parts = data.split()
+                if len(parts) != 1:
+                    self.register(parts[1])
+                else:
+                    print("USAGE: reg {nickname}")
 
             # elif data == "quit":
             #     self.deregister(self.nickname)
