@@ -73,12 +73,20 @@ class Client():
         print(self.comms.peers)
 
     def handle_message(self, msg):
+        if msg.ack:
+            self.comms.send_ack(msg)
+
+        if msg.event_id == Events.ACK:
+            self.comms.handle_ack(msg)
+
         if msg.event_id in [Events.BROADCAST, Events.DIRECT_MESSAGE]:
             self.logger.debug(f'{self.me.name}: {msg}')
-            print(msg)
+            print(f'<<{msg.sender.name}>> {msg.data}')
 
         if msg.event_id == Events.CLIENT_UPDATE:
             self.update_clients(msg)
+
+        
 
 
     def shell(self):

@@ -77,10 +77,31 @@ class Comms:
         for p in self.peers:
             print(p)
 
+    def handle_ack(self, msg):
+        if msg.data in self.acks:
+            self.acks[msg.data] = True
+            self.logger.info(f'{self.me.name}: Valid ACK {msg.data}')
+        else:
+            self.logger.info(f'{self.me.name}: Invalid ACK {msg.data}')
+
+    def track_ack(self, msg):
+        self.acks[msg.hash] = False
+
+    def send_ack(self, msg):
+        ack_msg = Message(
+            event_id=Events.ACK,
+            sender = msg.recipient,
+            recipient = msg.sender,
+            data = msg.hash,
+            ack = False,
+            timeout = TIMEOUT_MESSAGE,
+            retries = 2
+        )
+        self.send(msg)
+
     def send(self, msg):
-        # if ack:
+        # if msg.ack:
         #     self.track_ack(msg)
-        print(msg)
         self.comm.sendto(msg.to_json().encode('utf-8'),
                          (msg.recipient.ip, msg.recipient.port))
         # if ack and verify:
